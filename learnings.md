@@ -10,3 +10,24 @@ Project scaffolding for the 6-week Rippling endpoint prep arc.
 - **Pydantic settings for config.** Environment-driven configuration with typing and validation at load time. Beats `os.environ.get()` scattered through code.
 
 Next session (Saturday marathon): Postgres setup, SQLAlchemy models, Alembic migration for users/orders/payments/idempotency_keys, first CRUD endpoints.
+
+## 2026-05-24 (Day 2)
+
+- What is the contract? POST /orders, requires user_id and positive amount, returns Order with 201, returns 404 if user missing, 422 if validation fails
+- What can fail? DB connection failure (500). User check passes but order create fails mid-transaction (500, but DB transaction rolls back). Network timeout from client (retry with idempotency key — coming Day 12).
+- What happens under retry? Currently not idempotent. A retry creates a duplicate order. This is a Day 12 fix.
+- What happens under concurrency? Two requests creating orders for the same user are safe (no shared state). Two requests creating orders that share an inventory item would conflict — not modeled here, but would need either a unique constraint at DB level or app-level locking.
+- What should be strongly consistent? Order creation must be transactional with any future inventory deduction. Eventual consistency is fine for downstream notifications/analytics.
+- How do we observe it? Currently no observability. Day 13 adds request IDs, structured logs, Prometheus metrics for request count, latency, error rate.
+- How do we roll it back? DB migrations are reversible via Alembic downgrade. Application rollback via image tag rollback (covered in K8s project).
+- How do we make junior engineers maintain it? Layered architecture (controller/service/repository) means each piece is independently testable and replaceable. Domain exceptions translate cleanly to HTTP. Pydantic at the boundary catches misuse early.
+
+LLD decision today: Separated services from repositories. Could have kept business logic 
+inline in controllers (simpler today). Chose service layer because:
+1. Business rules ("user must exist for order creation") belong in one place, not duplicated 
+   across endpoints
+2. Domain exceptions (UserNotFound) are HTTP-framework-agnostic — could be called from a 
+   worker, gRPC handler, or CLI without rewriting
+3. Tests can verify business logic without spinning up FastAPI test client
+Tradeoff accepted: more files, more layers. Worth it for any project beyond a 
+single-endpoint demo.
