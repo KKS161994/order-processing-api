@@ -12,6 +12,9 @@ config = context.config
 from app.config.settings import settings
 from app.db.session import Base
 from app.models.user import User  # noqa: F401
+from app.models.payment import Payment # noqa: F401
+from app.models.order import Order # noqa: F401
+from app.models.idempotency import IdempotencyKey # noqa: F401
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = Base.metadata
