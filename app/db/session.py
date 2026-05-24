@@ -26,8 +26,10 @@ SessionLocal = sessionmaker(
 
 def get_db() -> Session:
     """FastAPI dependency for database session"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close
+    with SessionLocal() as db:
+        try:
+            yield db
+            db.commit()       # success path — one commit for the whole request
+        except Exception:
+            db.rollback()     # any error anywhere — single rollback
+            raise

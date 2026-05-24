@@ -18,11 +18,15 @@ Run locally with::
 from fastapi import FastAPI
 
 from app.config.settings import settings
+from app.api import users,orders
 
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
 )
+
+app.include_router(users.router)
+app.include_router(orders.router)
 
 
 @app.get("/health")

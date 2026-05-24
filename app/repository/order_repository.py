@@ -10,8 +10,8 @@ class OrderRepository:
         order = Order(user_id = user_id, amount = amount,currency=currency)
         self.db.add(order)
         self.db.commit()
-        self.db.refresh(Order)
-        return Order
+        self.db.refresh(order)
+        return order
     
 
     def get_by_id(self,order_id:int)->Order | None:
@@ -24,4 +24,4 @@ class OrderRepository:
             .order_by(Order.created_at.desc())
             .limit(limit)
             .offset(offset)
-        ).scalars.all()
+        ).scalars().all()
