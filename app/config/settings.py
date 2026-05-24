@@ -20,6 +20,18 @@ class Settings(BaseSettings):
     environment:
         Deployment target — ``development``, ``staging``, or ``production``.
         Used to gate debug behaviour and pick environment-specific defaults.
+    db_host, db_port, db_name, db_user, db_password:
+        PostgreSQL connection parameters. Defaults target the local
+        ``docker-compose`` postgres service; override via environment variables
+        (``DB_HOST`` etc.) or ``.env`` in non-local environments. Treat
+        ``db_password`` as a secret — never commit a real value.
+
+    Properties
+    ----------
+    database_url:
+        SQLAlchemy/psycopg-style URL assembled from the ``db_*`` fields. Use
+        this when handing a connection string to SQLAlchemy or Alembic rather
+        than concatenating fields at the call site.
 
     Usage
     -----
@@ -49,6 +61,19 @@ class Settings(BaseSettings):
     app_name: str = "order-processing-api"
     app_version: str = "0.1.0"
     environment: str = "development"
+
+    db_host:str = "localhost"
+    db_port:int = 5432
+    db_name:str = "order_processing"
+    db_user:str = "orderapi"
+    db_password:str = "orderapi_dev_password"
+
+    @property
+    def database_url(self) -> str:
+        return (
+            f"postgresql+psycopg://{self.db_user}:{self.db_password}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
 
     class Config:
         env_file = ".env"
