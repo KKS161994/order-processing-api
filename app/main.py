@@ -19,12 +19,16 @@ from fastapi import FastAPI
 
 from app.config.settings import settings
 from app.api import users,orders
+from app.api.errors import http_exception_handler, request_validation_handler
+from fastapi.exceptions import RequestValidationError,HTTPException
 
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
 )
 
+app.add_exception_handler(HTTPException,http_exception_handler)
+app.add_exception_handler(RequestValidationError,request_validation_handler)
 app.include_router(users.router)
 app.include_router(orders.router)
 

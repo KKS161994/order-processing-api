@@ -1,10 +1,24 @@
 from datetime import datetime
 from decimal import Decimal
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 class UserCreate(BaseModel):
     email: EmailStr
     name:str = Field(min_length= 1, max_length=255)
+    
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls,v:str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("name cannot be empty or whitespace only")
+        return stripped
+    
+    @field_validator("email")
+    @classmethod
+    def normalise_email(cls,v:str)->str:
+        return v.lower().strip()
+
 
 class UserResponse(BaseModel):
     id: int
