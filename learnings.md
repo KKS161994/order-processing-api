@@ -31,3 +31,17 @@ inline in controllers (simpler today). Chose service layer because:
 3. Tests can verify business logic without spinning up FastAPI test client
 Tradeoff accepted: more files, more layers. Worth it for any project beyond a 
 single-endpoint demo.
+
+## End-of-marathon reflection
+
+The cognitive shift today was hands working faster than conscious deliberation. By Hour 3, the layering (controller → service → repository → ORM) felt automatic. By Hour 4, refactoring controllers to use services took 10 minutes for something that would have taken an hour at the start.
+
+What automaticity covers now:
+- Engine + SessionMaker + Session lifecycle
+- ORM models with intentional column choices (Decimal for money, indexed FKs, UTC timestamps)
+- Pydantic schemas as API boundary, separate from ORM
+- Repository → Service → Controller layering
+- Domain exceptions translated to HTTP at controller boundary
+- Alembic autogenerate + apply
+
+This is the muscle that interview pressure tests. It's not knowledge; it's reflex. Building it requires reps, not reading. Today was one rep.
