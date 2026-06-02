@@ -45,3 +45,26 @@ What automaticity covers now:
 - Alembic autogenerate + apply
 
 This is the muscle that interview pressure tests. It's not knowledge; it's reflex. Building it requires reps, not reading. Today was one rep.
+
+
+## 2026-05-25 (Day 4)
+
+Active recall review of Saturday's marathon material. Gaps found:
+- [list what you got wrong or fuzzy on in Phase 1 — be honest, this is the most valuable part of today]
+
+Then: consistent error envelope work.
+
+**Error contract design:**
+- One shape for every error: error.code (human-readable string like "not_found"), error.message, error.status, error.timestamp. Optional details (for validation errors with field-level info) and request_id (Week 3 hook).
+- Consumers parse all errors the same way regardless of which endpoint produced them. SDE 2 APIs often have ad-hoc error shapes per endpoint — frontends end up writing custom error parsers for each case.
+- The timestamp on every error is small but real — when a user says "the API errored at 3:47pm" you can find logs by time.
+
+**Input normalization:**
+- Email lowercased + stripped. Without this, "Alice@example.com" and "alice@example.com" become two different users in practice — duplicate accounts.
+- Name stripped + empty-after-strip rejected. Frontend forms send messy input; backend is the source of truth for normalization.
+- `field_validator` is Pydantic v2; `validator` is v1. Today's project is v2.
+
+**Applied LLD decision today:**
+Defined exception handlers at the FastAPI level rather than catching and re-formatting in each endpoint. Alternative was per-endpoint try/except returning JSONResponse manually. Centralized wins because (a) no risk of forgetting it in a new endpoint (b) one place to evolve the error contract (c) controller code stays focused on happy path.
+
+Next session: refine read endpoints with pagination edge cases.

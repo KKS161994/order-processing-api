@@ -1,6 +1,28 @@
 from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import TypeVar, Generic
+
+T = TypeVar("T")
+
+class PaginationMeta(BaseModel):
+    limit: int
+    offset: int
+    total: int
+    has_more: bool
+
+class CursorPaginationMeta(BaseModel):
+    limit: int
+    next_cursor: int | None
+    has_more: bool
+
+class PaginatedResponse(BaseModel, Generic[T]): 
+    items: list[T]
+    pagination: PaginationMeta
+
+class CursorPaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    pagination: CursorPaginationMeta
 
 class UserCreate(BaseModel):
     email: EmailStr

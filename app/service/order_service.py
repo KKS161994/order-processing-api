@@ -44,4 +44,29 @@ class OrderService:
             offset=offset,
         )
         return orders
-        
+    
+    def list_order_by_user(self, user_id:int,limit:int = 20, offset: int=0)->tuple[list[Order],int]:
+        user= self.user_repo.get_by_id(
+            id = user_id
+        )
+        if user is None:
+            raise UserNotFound(f"User {user_id} not exist")
+        orders = self.order_repo.list_by_users(
+            user_id= user_id,
+            limit=limit,
+            offset=offset
+        )
+        total = self.order_repo.count_by_user(user_id)
+        return (orders,total)
+    
+    def list_user_order_after(self,user_id:int , cursor: int|None , limit:int = 20 )->list[Order]:
+        user= self.user_repo.get_by_id(
+            id = user_id
+        )
+        if user is None:
+            raise UserNotFound(f"User {user_id} not exist")
+        return self.order_repo.list_by_user_after(
+            user_id=user_id,
+            cursor=cursor,
+            limit = limit,
+        )
