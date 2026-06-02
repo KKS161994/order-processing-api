@@ -68,3 +68,56 @@ Then: consistent error envelope work.
 Defined exception handlers at the FastAPI level rather than catching and re-formatting in each endpoint. Alternative was per-endpoint try/except returning JSONResponse manually. Centralized wins because (a) no risk of forgetting it in a new endpoint (b) one place to evolve the error contract (c) controller code stays focused on happy path.
 
 Next session: refine read endpoints with pagination edge cases.
+
+
+## 2026-06-02 (Day 5 — back after 9-day illness)
+
+**Revision phase recall results:**
+- [List what you got right and what you fumbled on the 4 questions]
+- Gaps to re-touch: [whatever wasn't reflexive]
+
+**Build: pagination wrappers + cursor variant.**
+
+Generic Pydantic models with TypeVar give one wrapper per pagination style,
+reusable across all list endpoints. Two wrappers because the metadata shapes
+are genuinely different — sharing would force optional fields everywhere.
+
+Repository: list_by_user_after uses keyset pagination — `where id < cursor`.
+O(limit) regardless of position. Stable across inserts because the cursor is
+a real row id, not a positional offset.
+
+Service: offset variant returns (items, total) tuple. Cursor variant returns
+just list — controller computes next_cursor from the last item. Both
+framework-agnostic — could serve gRPC, CLI, anything.
+
+**Offset vs cursor pagination — the tradeoff:**
+
+Offset:
+- Pro: simple, supports jumping to arbitrary pages, native total count
+- Con: O(offset) DB scan — page 1000 is slow. Inconsistent results if rows
+  are inserted/deleted between requests (skips or duplicates)
+- Use for: admin dashboards, search results with page numbers
+
+Cursor (keyset):
+- Pro: O(limit) regardless of position. Stable across concurrent inserts.
+- Con: can't jump to arbitrary pages. No native total count.
+- Use for: user-facing feeds, infinite scroll, "load more" UIs
+
+This is staff-level signal because most candidates know one pattern; few
+have implemented both on the same project and can verbalize when each fits.
+
+**Applied LLD decision today:**
+Two distinct PaginatedResponse types instead of one with optional fields.
+Tradeoff: more code, slightly more wrapper definitions. Won the call because:
+- Each response model is exhaustively typed — no runtime "is offset None or
+  is cursor None" branching
+- Documents intent at the type level — the API contract is self-evident
+- Adds a third variant later (e.g., time-based) without polluting existing types
+
+**Energy check:**
+Re-entry felt OK. Revision phase was worth the 15 min — without it I'd have
+spent 20+ min looking up patterns mid-flow. Mild weakness still there at the
+end of the 90 min, but no GI flare. Tomorrow normal cadence assumed.
+
+Next: Day 6 (Wed Jun 3) — testing. pytest expansion to ≥10 tests covering
+CRUD, validation, error envelope, and both pagination variants.
