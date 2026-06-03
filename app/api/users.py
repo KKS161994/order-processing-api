@@ -35,6 +35,7 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
     except UserNotFound as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(e))    
 
+# Position based pagination
 @router.get("/{user_id}/orders",
             response_model=PaginatedResponse[OrderResponse],
             )
@@ -64,6 +65,7 @@ def list_user_orders(
         )
     )
 
+# Value based pagination ie orderid > cursor
 @router.get(
     "/{user_id}/orders/cursor",
     response_model=CursorPaginatedResponse[OrderResponse],

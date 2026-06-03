@@ -79,7 +79,7 @@ async def request_validation_handler(
     ]
 
     return _error_response(
-        status_code=402,
+        status_code=422,
         code = "validation_error",
         message = "validation request failed",
         details={"errors":errors}
