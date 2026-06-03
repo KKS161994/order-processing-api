@@ -2,6 +2,8 @@
 
 A working reference for patterns, commands, and decisions used in this project. Updated as the project evolves.
 
+> **Rule (effective Jun 3, 2026):** Every day that adds a new pattern, helper, decision, or gotcha → this cheatsheet gets updated in the same commit phase, same day. No new pattern goes undocumented. The cheatsheet stays current with the codebase.
+
 ---
 
 ## Quick index — common tasks
@@ -277,6 +279,324 @@ class OrderCreate(BaseModel):
 | `Field(default=..., ...)` | Default value with validation |
 | `Field(decimal_places=2)` | Decimal: max 2 decimal places |
 | `from_attributes=True` | Build response from ORM object attributes (not dict) |
+
+### Field validators — input normalization (Pydantic v2)
+
+For transformations beyond simple type/length checks (lowercase, strip, custom rules):
+
+```python
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: str = Field(min_length=1, max_length=255)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("name cannot be empty or whitespace only")
+        return stripped
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.lower().strip()
+```
+
+| Pattern | Why |
+|---|---|
+| `@field_validator("name")` | Pydantic v2 syntax. v1 used `@validator`. The `@classmethod` is required |
+| Email lowercase + strip | Emails are case-insensitive in practice. Without this, `Alice@example.com` and `alice@example.com` become two different users |
+| Name strip + reject empty | Frontend forms send messy input. Backend is the source of truth for normalization |
+| Raise `ValueError` (not `HTTPException`) | Pydantic catches it and converts to a 422 validation error automatically |
+
+---
+
+## Paginated response wrappers — offset + cursor variants
+
+List endpoints return `{"items": [...], "pagination": {...}}` — not raw arrays. Two distinct wrappers because the metadata shapes are genuinely different.
+
+### Schemas — generic wrappers (Pydantic v2)
+
+```python
+from typing import Generic, TypeVar
+from pydantic import BaseModel
+
+T = TypeVar("T")
+
+
+class PaginationMeta(BaseModel):
+    limit: int
+    offset: int
+    total: int
+    has_more: bool
+
+
+class CursorPaginationMeta(BaseModel):
+    limit: int
+    next_cursor: int | None
+    has_more: bool
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    pagination: PaginationMeta
+
+
+class CursorPaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    pagination: CursorPaginationMeta
+```
+
+| Pattern | Why |
+|---|---|
+| `Generic[T]` + `TypeVar("T")` | One wrapper definition, reusable across all list endpoints (orders, users, payments, etc.) |
+| Two distinct wrappers (not one with optional fields) | Each shape exhaustively typed. No `if next_cursor is None and offset is None` runtime branching. Documents intent at the type level |
+| `response_model=PaginatedResponse[OrderResponse]` | Parametric response model — FastAPI resolves the generic in OpenAPI docs too |
+| `OrderResponse.model_validate(obj)` | Pydantic v2 explicit construction from ORM. Clearer than relying on `from_attributes=True` when wrapping in generics |
+
+### Offset pagination — repository pattern
+
+```python
+from sqlalchemy import select, func
+
+
+def list_by_user(
+    self, user_id: int, limit: int = 20, offset: int = 0
+) -> list[Order]:
+    return (
+        self.db.execute(
+            select(Order)
+            .where(Order.user_id == user_id)
+            .order_by(Order.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def count_by_user(self, user_id: int) -> int:
+    return self.db.scalar(
+        select(func.count())
+        .select_from(Order)
+        .where(Order.user_id == user_id)
+    ) or 0
+```
+
+| Pattern | Why |
+|---|---|
+| `select(func.count()).select_from(Model)` | SQLAlchemy 2.0 idiom for COUNT. Replaces legacy `db.query(Model).count()` |
+| `or 0` after `db.scalar(...)` | `scalar` can return None if no rows; safe default |
+| `.order_by(Order.created_at.desc())` | Ordering is mandatory for pagination — without it, page contents are undefined |
+
+### Cursor pagination — keyset pattern
+
+```python
+def list_by_user_after(
+    self, user_id: int, cursor: int | None, limit: int = 20
+) -> list[Order]:
+    stmt = select(Order).where(Order.user_id == user_id)
+    if cursor is not None:
+        stmt = stmt.where(Order.id < cursor)
+    stmt = stmt.order_by(Order.id.desc()).limit(limit)
+    return self.db.execute(stmt).scalars().all()
+```
+
+| Pattern | Why |
+|---|---|
+| `cursor: int | None` | `None` means "from the beginning" — standard cursor pagination contract |
+| `where(Order.id < cursor)` | Keyset filter. The cursor is a real row ID, not a position offset |
+| `order_by(Order.id.desc())` | Ordering determines cursor semantics. Changing order breaks existing cursors |
+| Controller computes `next_cursor` | `next_cursor = items[-1].id if items and len(items) == limit else None` |
+
+### Service layer — return shapes
+
+```python
+# Offset version returns (items, total) tuple — controller assembles wrapper
+def list_user_orders(
+    self, user_id: int, limit: int = 20, offset: int = 0
+) -> tuple[list[Order], int]:
+    user = self.user_repo.get_by_id(user_id)
+    if user is None:
+        raise UserNotFound(f"user {user_id} not found")
+    orders = self.order_repo.list_by_user(user_id, limit=limit, offset=offset)
+    total = self.order_repo.count_by_user(user_id)
+    return orders, total
+
+# Cursor version returns plain list — controller derives next_cursor
+def list_user_orders_after(
+    self, user_id: int, cursor: int | None, limit: int = 20
+) -> list[Order]:
+    user = self.user_repo.get_by_id(user_id)
+    if user is None:
+        raise UserNotFound(f"user {user_id} not found")
+    return self.order_repo.list_by_user_after(user_id, cursor=cursor, limit=limit)
+```
+
+Service stays framework-agnostic — returns domain types (tuples, lists), not HTTP response models.
+
+### Controller — assembling the response
+
+```python
+@router.get(
+    "/{user_id}/orders",
+    response_model=PaginatedResponse[OrderResponse],
+)
+def list_user_orders(
+    user_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    service = OrderService(db)
+    try:
+        orders, total = service.list_user_orders(user_id, limit=limit, offset=offset)
+    except UserNotFound as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    return PaginatedResponse[OrderResponse](
+        items=[OrderResponse.model_validate(o) for o in orders],
+        pagination=PaginationMeta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            has_more=(offset + len(orders)) < total,
+        ),
+    )
+```
+
+### Offset vs cursor — the tradeoff
+
+| | Offset | Cursor (keyset) |
+|---|---|---|
+| **Performance** | O(offset) scan — page 1000 slow | O(limit) regardless of position |
+| **Stability** | Skips/duplicates if rows inserted/deleted between requests | Stable across concurrent writes |
+| **Arbitrary page jumps** | Yes (page 5, page 100) | No — sequential only |
+| **Total count** | Native via separate COUNT query | Would need separate COUNT query |
+| **Use for** | Admin dashboards, search results with page numbers | User-facing feeds, infinite scroll, "load more" |
+
+**Senior signal:** most candidates know one pattern; few have implemented both on the same project and can verbalize the tradeoff. Having both endpoints in one repo lets you point to working code in either direction during the interview discussion.
+
+---
+
+## Custom error envelope — consistent error contract
+
+`HTTPException` defaults give different shapes per endpoint. Override with custom handlers for a uniform contract.
+
+### app/api/errors.py
+
+```python
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException
+
+
+def _error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    details: Any = None,
+    request_id: str | None = None,
+) -> JSONResponse:
+    payload = {
+        "error": {
+            "code": code,
+            "message": message,
+            "status": status_code,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    }
+    if details is not None:
+        payload["error"]["details"] = details
+    if request_id is not None:
+        payload["error"]["request_id"] = request_id
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    code_map = {
+        400: "bad_request",
+        401: "unauthorized",
+        403: "forbidden",
+        404: "not_found",
+        409: "conflict",
+        422: "validation_error",
+        429: "rate_limited",
+        500: "internal_error",
+        503: "service_unavailable",
+    }
+    return _error_response(
+        status_code=exc.status_code,
+        code=code_map.get(exc.status_code, "error"),
+        message=str(exc.detail) if exc.detail else "",
+    )
+
+
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    errors = [
+        {
+            "field": ".".join(str(loc) for loc in err["loc"] if loc != "body"),
+            "message": err["msg"],
+            "type": err["type"],
+        }
+        for err in exc.errors()
+    ]
+    return _error_response(
+        status_code=422,
+        code="validation_error",
+        message="request validation failed",
+        details={"errors": errors},
+    )
+```
+
+### Wire into the app — main.py
+
+```python
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException
+
+from app.api.errors import http_exception_handler, validation_exception_handler
+
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+```
+
+### What every error response looks like
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "user 99999 not found",
+    "status": 404,
+    "timestamp": "2026-05-25T08:42:17.123456+00:00"
+  }
+}
+```
+
+| Design point | Why |
+|---|---|
+| `code` (human-readable) | `"not_found"` instead of just `404`. Frontends can branch on code without parsing messages |
+| `message` (human-readable) | What the human user or developer sees |
+| `status` (echoes HTTP status) | Convenience for clients that consume body without inspecting headers |
+| `timestamp` (UTC ISO) | When a user reports "errored at 3:47pm," the timestamp finds the right logs |
+| `details` (optional, structured) | Field-level info for validation errors |
+| `request_id` (optional, hook) | Wired up in Week 3 with observability; the hook exists from day one |
+
+**Senior signal:** one consistent error contract that frontends can parse uniformly. SDE 2 APIs often have ad-hoc error shapes per endpoint — frontends end up writing custom error parsers for each case.
+
+**Centralized vs per-endpoint:** defining handlers at the FastAPI level beats catching/reformatting in each endpoint because (a) no risk of forgetting it in a new endpoint, (b) one place to evolve the contract, (c) controller code stays focused on the happy path.
 
 ---
 
@@ -651,6 +971,36 @@ psql -h localhost -p 5432 -U <u> -d <db>                    # whatever's on loop
 
 12. **Cognitive automaticity is the muscle that interview pressure tests.** Hands moving faster than conscious thought. Built by reps, not reading. Marathon 1 was one rep.
 
+### Monday May 25 — Day 4
+
+13. **Consistent error envelope is a senior signal.** One shape across all errors — `error.code`, `error.message`, `error.status`, `error.timestamp`, optional `details` and `request_id`. Frontends parse all errors uniformly. SDE 2 APIs leak FastAPI's default shape AND per-endpoint custom shapes side by side.
+
+14. **`code` (string) belongs alongside HTTP `status` (int).** `"not_found"` lets clients branch on a stable identifier without parsing English messages or magic numbers. Localization, error analytics, and client logic all benefit.
+
+15. **Centralize error handlers at the framework level, not per endpoint.** `app.add_exception_handler(HTTPException, ...)` runs for every endpoint, no risk of forgetting. One place to evolve the contract. Controllers stay focused on the happy path.
+
+16. **Input normalization happens at the boundary, in Pydantic validators.** Email lowercase + strip, name strip. Without this, frontend whitespace and case differences create duplicate-but-different users. `@field_validator` is Pydantic v2; `@validator` is v1.
+
+17. **Raise `ValueError` inside Pydantic validators — not `HTTPException`.** Pydantic catches it and surfaces it as a 422 with the message included. Keeps validators framework-agnostic.
+
+18. **Active recall beats passive re-reading.** When material feels fuzzy, write answers from memory then check. Gaps found this way are the real learnings — they map to where you'd fumble in an interview. Passive re-reading creates the illusion of familiarity without depth.
+
+### Tuesday Jun 2 — Day 5 (return from illness)
+
+19. **Generic response wrappers (`PaginatedResponse[T]`) are reusable across all list endpoints.** One wrapper definition, many item types. The alternative — defining a fresh wrapper per resource — accumulates code without adding clarity.
+
+20. **Two distinct pagination wrappers, not one with optional fields.** Offset and cursor metadata have genuinely different shapes (`total`/`offset` vs `next_cursor`). Sharing one wrapper forces optional-everywhere typing and runtime null checks. Two clean shapes, one purpose each.
+
+21. **SQLAlchemy 2.0 syntax is the consistency baseline.** `select(func.count()).select_from(Model)` replaces legacy `db.query(Model).count()`. The codebase should commit to one style — mixed `.query()` and `select()` across files is a smell.
+
+22. **Cursor pagination is `where(id < cursor) order_by(id desc) limit N`.** The cursor is a real row ID, not a position. O(limit) regardless of dataset size. Stable across concurrent inserts because the filter is on a stable value.
+
+23. **Ordering is mandatory for pagination.** Without `order_by`, page contents are undefined — the DB returns rows in physical storage order which can change. This is the bug that ships as "users sometimes see the same order twice."
+
+24. **Service returns domain types, controller assembles HTTP shapes.** Offset service returns `(items, total)` tuple; cursor service returns `list[Item]`. The HTTP wrapper (`PaginatedResponse[T]`, `next_cursor` computation) is the controller's job. Keeps services framework-agnostic.
+
+25. **Senior signal in pagination: name the tradeoff explicitly.** Offset for admin dashboards (total counts, arbitrary jumps). Cursor for user-facing feeds (stable performance, infinite scroll). Having both implementations in the same repo lets you point to code in either direction.
+
 ### Applied LLD decision — Saturday May 23
 
 **Decision:** Service layer between controllers and repositories.
@@ -664,6 +1014,34 @@ psql -h localhost -p 5432 -U <u> -d <db>                    # whatever's on loop
 - The boundary between "is this allowed" and "how do I return it" becomes explicit
 
 **Tradeoff accepted:** more files, more layers. Worth it for any project beyond a single-endpoint demo.
+
+### Applied LLD decision — Monday May 25 (Day 4)
+
+**Decision:** Define exception handlers at the FastAPI app level (`app.add_exception_handler`) rather than catching and re-formatting errors per endpoint.
+
+**Alternative considered:** Per-endpoint try/except returning `JSONResponse` manually with the envelope shape.
+
+**Why centralized wins:**
+- No risk of forgetting it in a new endpoint — every `HTTPException` and `RequestValidationError` automatically flows through the handler
+- One place to evolve the error contract (e.g., adding `request_id` later requires one edit, not N)
+- Controller code stays focused on the happy path — no boilerplate error formatting drowning out business logic
+- Easier to test the error contract in isolation
+
+**Tradeoff accepted:** less per-endpoint control over error shape. If a specific endpoint needs a different error format, you'd override at that endpoint — but that's rare and worth the friction (forces conscious deviation).
+
+### Applied LLD decision — Tuesday Jun 2 (Day 5)
+
+**Decision:** Two distinct `PaginatedResponse` types (offset + cursor) instead of one wrapper with optional fields.
+
+**Alternative considered:** Single `PaginatedResponse[T]` with optional `offset`, `total`, `next_cursor` — discriminate at runtime by which fields are non-None.
+
+**Why two distinct wrappers win:**
+- Each response model is exhaustively typed — no `if next_cursor is None and offset is None` runtime branching
+- API contract is self-documenting — readers see exactly what fields exist for which pagination style
+- Adds a third variant later (e.g., time-based, or compound cursor) without polluting existing types
+- OpenAPI docs render cleanly — no fields marked optional that are actually always-present-in-context
+
+**Tradeoff accepted:** more wrapper definitions, slightly more code. Won the call because typed clarity compounds across the codebase; runtime branching on Optional fields is the kind of code that becomes legacy quickly.
 
 ---
 
