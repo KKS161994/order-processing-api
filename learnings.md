@@ -121,3 +121,48 @@ end of the 90 min, but no GI flare. Tomorrow normal cadence assumed.
 
 Next: Day 6 (Wed Jun 3) — testing. pytest expansion to ≥10 tests covering
 CRUD, validation, error envelope, and both pagination variants.
+
+
+## 2026-06-03 (Day 6 — testing)
+
+**Revision phase recall:**
+- [List the 4 questions and what you got right/fumbled]
+- Gaps to re-touch: [whatever wasn't reflexive]
+
+**Build: pytest suite, 13 tests covering CRUD + pagination.**
+
+Test infrastructure design:
+- Separate test database (`order_processing_test`) so tests never touch dev data
+- drop_all + create_all per test = simple, reliable, slow. Acceptable at 13 tests.
+  When suite grows to 50+, switch to transaction-rollback isolation (start txn at
+  fixture entry, rollback at fixture exit — each test runs in a discarded txn)
+- `app.dependency_overrides[get_db] = override_get_db` is FastAPI's mechanism for
+  swapping dependencies in tests. Same pattern used later for Redis, payment
+  gateway, etc.
+- `scope="function"` on fixtures = fresh state per test. Slow but isolated.
+  `scope="session"` = setup shared across all tests (use for expensive
+  immutable resources only)
+
+**Test design principles applied:**
+- One test per concern. `test_create_user_normalizes_email_and_name` tells you
+  what failed when it breaks. SDE 2 anti-pattern: `test_create_user_1`, `test_2`,
+  etc. — destroys the value of the suite.
+- Assert the error envelope shape, not just the status code. Catches a
+  regression where someone removes the custom handlers (would still return
+  HTTP 409 but with FastAPI's default shape, not yours).
+- Setup inline where it's small. One `_create_user` helper, no fixture yet.
+  Extract to a fixture only when ≥3 tests need the same setup.
+
+**Applied LLD decision today:**
+Test database is a separate Postgres database, not SQLite in-memory.
+Tradeoff: slower tests, requires Postgres running. Won the call because
+SQLAlchemy 2.0 dialect features (server_default=func.now, Numeric precision,
+timezone-aware DateTime) behave differently in SQLite vs Postgres — tests
+that pass on SQLite can fail in production. Better to test against the real
+DB engine even at the cost of speed.
+
+**Energy check:** Held up through the 90 min, no GI flare, mild fatigue at
+the end (expected). Tomorrow continues normal cadence.
+
+Next: Day 7 (Thu Jun 4) — start Week 2 with JWT auth. Login endpoint,
+token generation, validation middleware.
