@@ -86,9 +86,17 @@ def client(db_session):
 
 @pytest.fixture
 def make_user(client):
-    def _make(*, email: str | None = None, name: str = "Test User") -> dict:
+    def _make(
+        *,
+        email: str | None = None,
+        name: str = "Test User",
+        password: str = "TestPassword123!",
+    ) -> dict:
         email = email or f"user-{uuid.uuid4()}@example.com"
-        resp = client.post("/users", json={"email": email, "name": name})
+        resp = client.post(
+            "/users",
+            json={"email": email, "name": name, "password": password},
+        )
         assert resp.status_code == 201, resp.text
         return resp.json()
 

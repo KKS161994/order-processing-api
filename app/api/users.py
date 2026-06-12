@@ -22,7 +22,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     service = UserService(db)
     try:
-        return service.create_user(email=payload.email, name=payload.name)
+        return service.create_user(email=payload.email, name=payload.name, password = payload.password)
     except UserAlreadyExists as e:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(e))
 

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.repository.user_repository import UserRepository
+from app.security.passwords import hash_pswd
 
 class UserAlreadyExists(Exception):
     pass
@@ -13,13 +14,15 @@ class UserService:
         self.repo = UserRepository(db)
         pass
 
-    def create_user(self,email:str, name:str)->User:
+    def create_user(self,email:str, name:str, password: str)->User:
         if self.repo.get_by_email(email):
             raise UserAlreadyExists(f"email {email} already exists")
         
+        hashed_pswd = hash_pswd(password)
         return self.repo.create(
             username = name,
             email=email,
+            password=hashed_pswd,
         )
 
     def get_user(self, user_id: int) -> User | None:

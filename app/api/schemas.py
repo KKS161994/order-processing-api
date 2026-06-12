@@ -27,7 +27,8 @@ class CursorPaginatedResponse(BaseModel, Generic[T]):
 class UserCreate(BaseModel):
     email: EmailStr
     name:str = Field(min_length= 1, max_length=255)
-    
+    password: str = Field(min_length=8, max_length= 128)
+
     @field_validator("name")
     @classmethod
     def strip_name(cls,v:str) -> str:

@@ -67,7 +67,9 @@ class Settings(BaseSettings):
     db_name:str = "order_processing"
     db_user:str = "orderapi"
     db_password:str = "orderapi_dev_password"
-
+    jwt_secret: str = "dev-secret-change-in-prod-min-32-chars"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
     @property
     def database_url(self) -> str:
         return (

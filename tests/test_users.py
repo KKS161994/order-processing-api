@@ -7,7 +7,7 @@ class TestCreateUser:
     def test_returns_201_on_valid_payload(self, client):
         resp = client.post(
             "/users",
-            json={"email": "alice@example.com", "name": "Alice"},
+            json={"email": "alice@example.com", "name": "Alice", "password": "TestPassword123!"},
         )
         assert resp.status_code == 201
         body = resp.json()
@@ -15,11 +15,12 @@ class TestCreateUser:
         assert body["name"] == "Alice"
         assert isinstance(body["id"], int) and body["id"] > 0
         assert "created_at" in body
+        assert "password" not in body and "password_hash" not in body
 
     def test_normalizes_email_and_name(self, client):
         resp = client.post(
             "/users",
-            json={"email": "ALICE@Example.COM", "name": "  Alice  "},
+            json={"email": "ALICE@Example.COM", "name": "  Alice  ", "password": "TestPassword123!"},
         )
         assert resp.status_code == 201
         body = resp.json()
@@ -27,7 +28,7 @@ class TestCreateUser:
         assert body["name"] == "Alice"
 
     def test_returns_409_on_duplicate_email(self, client, assert_error_envelope):
-        payload = {"email": "bob@example.com", "name": "Bob"}
+        payload = {"email": "bob@example.com", "name": "Bob", "password": "TestPassword123!"}
         assert client.post("/users", json=payload).status_code == 201
         err = assert_error_envelope(
             client.post("/users", json=payload),
@@ -37,9 +38,11 @@ class TestCreateUser:
         assert "exists" in err["message"].lower()
 
     def test_returns_409_on_duplicate_email_different_casing(self, client, assert_error_envelope):
-        assert client.post("/users", json={"email": "carol@example.com", "name": "Carol"}).status_code == 201
+        first = {"email": "carol@example.com", "name": "Carol", "password": "TestPassword123!"}
+        second = {"email": "CAROL@example.com", "name": "Carol", "password": "TestPassword123!"}
+        assert client.post("/users", json=first).status_code == 201
         assert_error_envelope(
-            client.post("/users", json={"email": "CAROL@example.com", "name": "Carol"}),
+            client.post("/users", json=second),
             status=409,
             code="conflict",
         )
