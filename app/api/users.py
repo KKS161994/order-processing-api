@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_current_user
 from app.api.schemas import (    
     CursorPaginatedResponse,
     CursorPaginationMeta,
@@ -12,6 +13,9 @@ from app.api.schemas import (
     UserResponse
     )
 from app.db.session import get_db
+from app.models.enums import UserRole
+from app.models.user import User
+from app.security.permissions import required_roles
 from app.service.order_service import OrderService
 from app.service.user_service import UserAlreadyExists, UserNotFound, UserService
 
@@ -28,7 +32,11 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-def get_user(user_id: int, db: Session = Depends(get_db)):
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _user : User = Depends(get_current_user),
+):
     service = UserService(db)
     try:
         return service.get_user(user_id)
@@ -44,6 +52,7 @@ def list_user_orders(
     limit:int = Query(default= 20, ge = 1, le = 20),
     offset:int = Query(default= 0, ge = 0),
     db:Session = Depends(get_db),
+    _admin:User = Depends(get_current_user)
 )->PaginatedResponse[OrderResponse]:
     service = OrderService(db)
     try :

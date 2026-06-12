@@ -1,7 +1,7 @@
 from sqlalchemy import DateTime,String,func
 from sqlalchemy.orm import mapped_column, Mapped
 from app.db.session import Base
-
+from app.models.enums import UserRole
 
 class User(Base):
     __tablename__ = "users"
@@ -23,3 +23,9 @@ class User(Base):
         nullable= True,
     )
 
+    user_role: Mapped[UserRole] = mapped_column(
+        String,
+        default=UserRole.CUSTOMER,
+        server_default=UserRole.CUSTOMER.value,
+        nullable=False,
+    )

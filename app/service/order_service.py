@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from app.models.enums import UserRole
 from app.models.order import Order
 from app.models.user import User
 from app.repository.order_repository import OrderRepository
@@ -14,9 +15,14 @@ class OrderService:
         self.order_repo = OrderRepository(db)
         self.user_repo = UserRepository(db)
 
-    def create_order(self,user_id:int , amount: int, currency: int)-> Order:
-        user = self.user_repo.get_by_id(user_id)
-        if user is None:
+    def create_order(self,user_id:int , 
+                     amount: int, 
+                     currency: int,
+                     actor: User)-> Order:
+        if actor.user_role == UserRole.CUSTOMER and actor.id != user_id:
+            raise PermissionError("Customer can only create order for themselves")        
+        target_user = self.user_repo.get_by_id(user_id)
+        if target_user is None:
             raise UserNotFound(f"User {user_id} not exist") 
         
         return self.order_repo.create(

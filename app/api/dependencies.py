@@ -27,7 +27,7 @@ def get_current_user(
             detail=str(e),
         )
     user_id = payload["sub"]
-    user = UserRepository(db).get_by_id(id)
+    user = UserRepository(db).get_by_id(user_id)
     if user is None:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,

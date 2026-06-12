@@ -6,7 +6,6 @@ class UserRepository:
     def __init__(self, db : Session):
         self.db = db
     
-
     def create(self,username:str, email:str,password:str)-> User:
         user = User(email = email, name =username,password_hash = password)
         self.db.add(user)

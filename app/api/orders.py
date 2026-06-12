@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import OrderCreate, OrderResponse
 from app.db.session import get_db
+from app.models.enums import UserRole
+from app.security.permissions import required_roles
 from app.service.order_service import OrderNotFound, OrderService
 from app.service.user_service import UserNotFound
 
@@ -10,13 +12,18 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
-def create_order(payload: OrderCreate, db: Session = Depends(get_db)):
+def create_order(
+    payload: OrderCreate, 
+    db: Session = Depends(get_db),
+    current_user = Depends(required_roles(UserRole.CUSTOMER, UserRole.ADMIN)),
+):
     service = OrderService(db)
     try:
         return service.create_order(
             user_id=payload.user_id,
             amount=payload.amount,
             currency=payload.currency,
+            actor = current_user,
         )
     except UserNotFound as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(e))
